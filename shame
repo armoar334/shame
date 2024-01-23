@@ -1,0 +1,267 @@
+#!/bin/sh
+
+# Shame: a pager written in (nearly) pure posix sh
+# Not more, not less, just about the same
+
+#trap 'restore_term' EXIT
+trap 'exit' INT
+
+sizeof_term() {
+	printf '%s[9999;9999H%s[6n' "$escape" "$escape"
+	running=true
+	while [ "$running" = true ]
+	do
+		char=$(dd ibs=1 count=1 2>/dev/null)
+		temp="$temp""$char"
+		case "$temp" in
+			*'R')
+				IFS='[;R' read -r _ lines columns _ <<EOF
+"$temp"
+EOF
+				running=false ;;
+		esac
+	done
+	temp=
+	char=
+	running=
+}
+
+setup_term() {
+	# Set escape sequence
+	escape=$(printf '\033')
+	# Save stty settings
+	prior="$(stty -g)"
+	printf '%s[?1049h' "$escape" # Switch buffer
+	#printf '%s[?25l' "$escape" # Hide cursor
+	stty -icanon -echo time 0
+}
+
+restore_term() {
+	printf '%s[?1049l' "$escape" # Switch buffer
+	#printf '%s[?25h' "$escape" # Hide cursor
+	stty $prior
+}
+
+replace_all() {
+	r_side="$1"
+	l_side=
+	line=
+	while [ -n "$r_side" ]
+	do
+		l_side="${r_side%%"$2"*}"
+		if  [ "$l_side" = "$r_side" ]
+		then
+ 			line="$line""$r_side"
+			return
+		fi
+		line="$line""$l_side""$3"
+		r_side="${r_side#*"$2"}"
+	done
+}
+
+search_text() {
+	printf '\033[%sH\033[K%s%s' "$lines" "${end}" '/'
+	stty echo
+	read -r highlight
+	stty -echo
+}
+
+draw_text() {
+	# This function is responsible for 3/4 of the cpu time used by shame
+	# Todo: make it not do that
+	printf '%s[H' "$escape"
+	linenum="$toplin"
+	length=$(( toplin + ( lines - 1 ) ))
+	until [ "$linenum" -ge "$length" ]
+	do
+		eval "line=\"\${$linenum}\""
+		replace_all "$line" "$tab" '    '
+		replace_all "$line" "$esc" '\e'
+		if [ -n "$highlight" ]
+		then
+			replace_all "$line" "$highlight" "${inv}$highlight${end}"
+		fi
+		line="${line#$prefrem}"
+		until [ ${#line} -le "$columns" ]
+		do
+			line="${line%?}"
+		done
+		printf '%s[K%s\n' "$esc" "$line"
+		linenum=$(( linenum + 1 ))
+	done
+	highlight=''
+	printf '%s%s%s' "${inv}" "$notify $toplin"'/'"$#" "${end}"
+}
+
+pref_rem_calc() {
+	# Create string of ? to use as hscroll
+	prefrem=''
+	temp=0
+	until [ "$temp" -ge "$hscroll" ]
+	do
+		prefrem="$prefrem"'?'
+		temp=$(( temp + 1 ))
+	done
+}
+
+getch() {
+	key=''
+	temp=''
+	
+	esc=$(printf '\033')
+	bsp=$(printf '\177')
+	new=$(printf '\n')
+	tab=$(printf '\t')
+
+	while [ -z "$key" ]
+	do
+		# This introduces a shit ton of latency, some pure posix witchcraft is a holy grail for speed here
+		char=$(dd ibs=6 count=1 2>/dev/null)
+		temp="$temp$char"
+		case "$temp" in
+			"$esc"*) esc_decode "$temp" ;;
+			"$bsp") key='backspace' ;;
+			"$new") key='newline' ;;
+			"$tab") key='tab' ;;
+			' ') key='space' ;;
+			[[:print:]]) key="$char" ;;
+			[[:cntrl:]])
+				key=$(( $(printf '%d' "'$temp") + 64 ))
+				key=$( printf '%03o' "$key")
+				key='ctrl+'$( printf '\'"$key");;
+			*) key='unknown' ;;
+		esac
+	done
+}
+	
+esc_decode() {
+	code="$*"
+	dec_temp=''
+	case "$code" in
+		*[A-Z]|*'~') # Only process when code is done
+		case "$code" in
+			*';2'*) dec_temp='shift+' ;;
+			*';3'*) dec_temp='alt+' ;;
+			*';4'*) dec_temp='alt+shift+' ;;
+			*';5'*) dec_temp='ctrl+' ;;
+			*';6'*) dec_temp='ctrl+shift+' ;;
+			*';7'*) dec_temp='ctrl+alt+' ;;
+			*';8'*) dec_temp='ctrl+alt+shift' ;;
+		esac
+		case "$code" in
+			$esc'['*'A')  key="$dec_temp""up" ;;
+			$esc'['*'B')  key="$dec_temp""down" ;;
+			$esc'['*'C')  key="$dec_temp""right" ;;
+			$esc'['*'D')  key="$dec_temp""left" ;;
+			$esc'['*'F')  key="$dec_temp""end" ;;
+			$esc'['*'H')  key="$dec_temp""home" ;;
+			$esc'[2'*'~') key="$dec_temp""insert" ;;
+			$esc'[3'*'~') key="$dec_temp""delete" ;;
+			$esc'[5'*'~') key="$dec_temp""pageup" ;;
+			$esc'[6'*'~') key="$dec_temp""pagedn" ;;
+		esac ;;
+	esac
+	
+	if [ -z "$key" ] && [ "${#code}" -gt 6 ]
+	then
+		key='unknown'
+	fi
+}
+
+IFS='
+'
+tab="$(printf '\t')"
+esc="$(printf '\033')"
+inv="$(printf '\033[7m')"
+end="$(printf '\033[0m')"
+
+if [ -t 0 ]
+then
+	if [ -z "$1" ]
+	then
+		printf '%s\n' "No input file specified!"
+	else
+		setup_term
+		file="$1"
+		notify="$1"
+		set --
+		# Use positional args as a hacky array
+		while read -r line
+		do
+			set -- "$@" "$line"
+		done < "$file"
+	fi
+else
+	set --
+	while read -r line
+	do
+		set -- "$@" "$line"
+	done
+	# Black magic to reopen stdin as tty
+	exec 0<&-
+	exec 0</dev/tty
+	setup_term
+	printf '%s' 'q' >&0
+fi
+
+paging=true
+toplin=1
+hscroll='0'
+sizeof_term
+while [ "$paging" = true ]
+do
+	# This may seem redundant (and it is) but its the only way i could stop it thrashing cpu
+	printf '%s' "$(draw_text "$@")"
+	# This dd is responsible for nearly all the cpu time
+	getch
+	case "$key" in
+		'u')
+			toplin=$(( toplin - ( lines - 1 ) ))
+			temp='' ;;
+		'd')
+			toplin=$(( toplin + ( lines - 1 ) ))
+			temp='' ;;
+		'/')
+			search_text
+			temp='' ;;
+		'q')
+			paging=false ;;
+		'up')
+			toplin=$(( toplin - 1 ))
+			temp='' ;;
+		'down')
+			toplin=$(( toplin + 1 ))
+			temp='' ;;
+		'right')
+			hscroll=$(( hscroll + 4 ))
+			pref_rem_calc
+			temp='' ;;
+		'left')
+			hscroll=$(( hscroll - 4 ))
+			pref_rem_calc
+			temp='' ;;
+		'pageup')
+			toplin=$(( toplin - ( lines - 1 ) ))
+			temp='' ;;
+		'pagedn')
+			toplin=$(( toplin + ( lines - 1 ) ))
+			temp='' ;;
+	esac
+	if [ "${#temp}" -gt 1 ]
+	then
+		case "$temp" in
+			"$escape"*) true ;;
+			*) temp='' ;;
+		esac
+	fi
+	if [ "${#temp}" -gt 4 ]; then temp=''; fi
+	if [ "$toplin" -lt 1 ]; then toplin=1; fi
+	if [ "$hscroll" -lt 0 ]; then hscroll=0; fi
+	if [ "$toplin" -gt $(( $# - ( lines - 2 ) )) ]
+	then
+		toplin=$(( $# - ( lines - 2 ) ))
+		notify='End of file'
+	fi
+done
+printf '%s' "$lines $columns"
+restore_term

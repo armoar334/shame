@@ -1,0 +1,82 @@
+#!/bin/bash
+
+# Shame: a pager written in (nearly) pure posix sh
+# Not more, not less, just about the same
+
+#trap 'restore_term' EXIT
+trap 'exit' INT
+
+replace_all() {
+	r_side="$1"
+	l_side=
+	line=
+	while [ -n "$r_side" ]
+	do
+		l_side="${r_side%%"$2"*}"
+		if  [ "$l_side" = "$r_side" ]
+		then
+ 			line="$line""$r_side"
+			return
+		fi
+		line="$line""$l_side""$3"
+		r_side="${r_side#*"$2"}"
+	done
+}
+
+draw_text() {
+	# This function is responsible for 3/4 of the cpu time used by shame
+	# Todo: make it not do that
+	printf '%s[H' "$esc"
+	linenum="$toplin"
+	length=$(( toplin + ( lines - 1 ) ))
+	all=''
+	while [ "$linenum" -le "$length" ]
+	do
+		eval "line=\"\${$linenum}\""
+		all="$all""$line"'
+'
+		# Literal newlines continue to suck
+		linenum=$(( linenum + 1 ))
+	done
+	replace_all "$all" "$tab" '    '
+	all="$line"
+	lefrem=$(printf '%*s' "$hscroll" '')
+	replace_all "$lefrem" ' ' '?'
+	lefrem="$line"
+	while IFS= read -r line
+	do
+	#	replace_all "$line" "$esc" '\e'
+		line="${line#$lefrem}"
+	#	until [ ${#line} -le "$columns" ]
+	#	do
+	#		line="${line%?}"
+	#	done
+		printf '%s[K%s\n' "$esc" "$line"
+	done <<EOF
+$all
+EOF
+	printf '%s%s%s' "${inv}" "$notify" "${end}"
+}
+
+IFS='
+'
+tab="$(printf '\t')"
+esc="$(printf '\033')"
+inv="$(printf '\033[7m')"
+end="$(printf '\033[0m')"
+
+file="$1"
+notify="$1"
+# Use positional args as a hacky array
+set --
+while read -r line
+do
+	set -- "$@" "$line"
+done < "$file"
+
+toplin=1
+hscroll=0
+lines=24
+columns=80
+#printf '%s\n' "$@"
+draw_text "$@"

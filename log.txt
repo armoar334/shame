@@ -1,0 +1,3 @@
+[?1049h./shame: line 72: 32 123: syntax error in expression (error token is "123")
+[H./shame: line 190: 32 123: syntax error in expression (error token is "123")
+32 123 [?1049l
