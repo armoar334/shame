@@ -4,8 +4,13 @@ A pager written in POSIX coreutils and sh
 # Usage (currently only supports one file)
 ```./shame file.txt```
 or
-```cat file.txt | shame```
-Arrow keys to move / pan, Page Up / Down to move by screen lines, / to highlight search
+```cat file.txt | shame```  
+|Keys| |
+|--|--|
+|Up / Down arrow keys | Scroll up / down by 1 line |
+|Left / Right arrow keys | Pan left / right by 4 characters|
+|Page Up / Down | Scroll up / down by terminal height lines |
+| / | Highlight search |
 
 # Installation
 ```
