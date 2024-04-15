@@ -8,5 +8,5 @@ or
 # Installation
 ```
 $ chmod +x shame
-$ mv shame (somewhere on $PATH)
+$ mv shame /usr/bin (or anywhere on $PATH)
 ```

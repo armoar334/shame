@@ -68,29 +68,40 @@ search_text() {
 
 draw_text() {
 	# This function is responsible for 3/4 of the cpu time used by shame
+	# 2024-04-15: ^ this isnt true, idk how i got that
 	# Todo: make it not do that
 	printf '%s[H' "$escape"
 	linenum="$toplin"
+	size=$#
+	if [ $toplin -lt 1 ]; then
+		toplin=1
+	fi
+	shift $(( toplin - 1 ))
 	length=$(( toplin + ( lines - 1 ) ))
-	until [ "$linenum" -ge "$length" ]
+	until [ "$linenum" -ge "$length" ] || [ $# -eq 0 ]
 	do
-		eval "line=\"\${$linenum}\""
+		line="$1"
 		replace_all "$line" "$tab" '    '
 		replace_all "$line" "$esc" '\e'
 		if [ -n "$highlight" ]
 		then
 			replace_all "$line" "$highlight" "${inv}$highlight${end}"
 		fi
-		line="${line#$prefrem}"
-		until [ ${#line} -le "$columns" ]
+		temp=0
+		while [ "$temp" -lt "$hscroll" ]; do
+		  line="${line#?}"
+		  temp=$(( temp + 1 ))
+		done
+		until [ ${#line} -le "$columns" ] || [ "$line" = "" ]
 		do
 			line="${line%?}"
 		done
 		printf '%s[K%s\n' "$esc" "$line"
 		linenum=$(( linenum + 1 ))
+		shift 1
 	done
 	highlight=''
-	printf '%s%s%s' "${inv}" "$notify $toplin"'/'"$#" "${end}"
+	printf '%s%s%s' "${inv}" "$notify $toplin"'/'"$size" "${end}"
 }
 
 pref_rem_calc() {
@@ -128,7 +139,7 @@ getch() {
 			[[:cntrl:]])
 				key=$(( $(printf '%d' "'$temp") + 64 ))
 				key=$( printf '%03o' "$key")
-				key='ctrl+'$( printf '\'"$key");;
+				key='ctrl+'$( printf "\\""$key");;
 			*) key='unknown' ;;
 		esac
 	done
@@ -201,7 +212,7 @@ else
 	exec 0<&-
 	exec 0</dev/tty
 	setup_term
-	printf '%s' 'q' >&0
+	#printf '%s' 'q' >&0 # Don't know what this is for, keeping incase it does something
 fi
 
 paging=true
