@@ -1,5 +1,5 @@
 # Shame
-A pager written in posix coreutils and sh
+A pager written in POSIX coreutils and sh
 
 # Usage (currently only supports one file)
 ```./shame file.txt```
